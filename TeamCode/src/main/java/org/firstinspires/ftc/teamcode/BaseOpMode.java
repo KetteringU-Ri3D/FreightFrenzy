@@ -27,9 +27,11 @@ public class BaseOpMode extends LinearOpMode {
         // define manipulator motors on the expansion hub using the following map
         // freightManipulatorLeft = 0
         // freightManipulatorRight = 1
-        // carouselManipulatorMotor = 2
+        // freightManipulatorFourBar = 2
+        // carouselManipulatorMotor = 3
         DcMotor freightManipulatorLeft = hardwareMap.dcMotor.get("freightManipulatorLeft");
         DcMotor freightManipulatorRight = hardwareMap.dcMotor.get("freightManipulatorRight");
+        DcMotor freightManipulatorFourBar = hardwareMap.dcMotor.get("freightManipulatorFourBar");
         DcMotor carouselManipulatorMotor = hardwareMap.dcMotor.get("carouselManipulatorMotor");
 
         // reverse the motors on the right side of the drivetrain
@@ -49,6 +51,40 @@ public class BaseOpMode extends LinearOpMode {
             // use mecanum drive control
             drivetrain.drive(driveFrontLeft, driveFrontRight, driveBackLeft, driveBackRight,
                     leftY, leftX, rightX);
+
+            // create a button map
+            // freight manipulator controls:
+            // left bumper = outtake, right bumper = intake
+            if(gamepad1.right_bumper == true) {
+                freightManipulator.intake(freightManipulatorLeft, freightManipulatorRight, 0.75);
+            }
+            else if(gamepad1.left_bumper == true) {
+                freightManipulator.outtake(freightManipulatorLeft, freightManipulatorRight, 0.75);
+            }
+            else {
+                freightManipulator.stopCollector(freightManipulatorLeft, freightManipulatorRight);
+            }
+
+            // freight manipulator four-bar controls:
+            // left trigger = lower, right trigger = raise, neither = stop
+            if(gamepad1.left_trigger >= 0.5) {
+                freightManipulator.raise(freightManipulatorFourBar, 0.5);
+            }
+            else if(gamepad1.left_trigger >= 0.5) {
+                freightManipulator.lower(freightManipulatorFourBar, 0.5);
+            }
+            else {
+                freightManipulator.stopFourBar(freightManipulatorFourBar);
+            }
+
+            // carousel manipulator controls:
+            // a = forward (duck towards the field), b = reverse (duck away from the field)
+            if(gamepad1.a == true) {
+                carouselManipulator.forward(carouselManipulatorMotor, 0.25);
+            }
+            else if(gamepad1.b == true) {
+                carouselManipulator.reverse(carouselManipulatorMotor, 0.25);
+            }
         }
     }
 }

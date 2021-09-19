@@ -65,7 +65,7 @@ public class FreightManipulator {
      * Stop the motors
      * @param motor motor that controls the lift
      */
-    public void stopLift(DcMotor motor) {
+    public void stopFourBar(DcMotor motor) {
         // spin both motors inward
         motor.setPower(0);
     }
