@@ -6,14 +6,19 @@ import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
+import com.qualcomm.robotcore.hardware.Servo;
 
 import org.firstinspires.ftc.robotcore.external.Func;
+import org.firstinspires.ftc.robotcore.external.navigation.Acceleration;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.AxesOrder;
 import org.firstinspires.ftc.robotcore.external.navigation.AxesReference;
 import org.firstinspires.ftc.robotcore.external.navigation.Orientation;
 import org.firstinspires.ftc.robotcore.external.navigation.Position;
 import org.firstinspires.ftc.robotcore.external.navigation.Velocity;
+import org.firstinspires.ftc.teamcode.CarouselManipulator;
+import org.firstinspires.ftc.teamcode.Drivetrain;
+import org.firstinspires.ftc.teamcode.FreightManipulator;
 
 import java.util.Locale;
 
@@ -21,30 +26,32 @@ import java.util.Locale;
  * The primary autonomous mode for the robot
  */
 @Autonomous
-public class AutonomousOpMode extends LinearOpMode {
-    // create an IMU object
+public class BlueCarouselPark extends LinearOpMode {
+
+    // The IMU sensor object
     BNO055IMU imu;
 
-    // state used for updating telemetry
+    // State used for updating telemetry
     Orientation angles;
+    Acceleration gravity;
 
     // define variables for later use
     // encoder pulses per revolution at the gearbox output shaft
     final double PULSES_PER_REV = 537.7;
 
     // gear reduction on the drive motors
-    final double DRIVE_GEAR_REDUCTION = 19.2;
+    //final double DRIVE_GEAR_REDUCTION = 19.2;
 
     // diameter of the wheel (96mm goBILDA mecanum)
     final double WHEEL_DIAMETER_INCHES = 3.78;
 
     final double PULSES_PER_INCH =
-            (PULSES_PER_REV * DRIVE_GEAR_REDUCTION) / (WHEEL_DIAMETER_INCHES * Math.PI);
+            PULSES_PER_REV / (WHEEL_DIAMETER_INCHES * Math.PI);
 
     // speed for various forms of movement, keeping it slow to account for wheel slipping
-    final double FORWARD_SPEED = 0.5;
-    final double ROTATION_SPEED = 0.5;
-    final double STRAFE_SPEED = 0.5;
+    final double FORWARD_SPEED = 0.35;
+    final double ROTATION_SPEED = 0.2;
+    final double STRAFE_SPEED = 0.45;
 
     @Override
     public void runOpMode() throws InterruptedException {
@@ -68,52 +75,87 @@ public class AutonomousOpMode extends LinearOpMode {
         driveBackRight.setDirection(DcMotorSimple.Direction.REVERSE);
 
         // define manipulator motors on the expansion hub using the following map
-        // freightManipulatorLeft = 0
-        // freightManipulatorRight = 1
-        // freightManipulatorFourBar = 2
-        // carouselManipulatorMotor = 3
-        DcMotor freightManipulatorLeft = hardwareMap.dcMotor.get("freightManipulatorLeft");
-        DcMotor freightManipulatorRight = hardwareMap.dcMotor.get("freightManipulatorRight");
+        // intake = 0
+        // freightManipulatorFourBar = 1
+        // carouselManipulatorMotor = 2
+        DcMotor intake = hardwareMap.dcMotor.get("freightManipulatorLeft");
         DcMotor freightManipulatorFourBar = hardwareMap.dcMotor.get("freightManipulatorFourBar");
         DcMotor carouselManipulatorMotor = hardwareMap.dcMotor.get("carouselManipulatorMotor");
+
+        Servo servo = hardwareMap.servo.get("cap1");
 
         // reset encoders
         driveFrontLeft.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         driveFrontRight.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         driveBackLeft.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         driveBackRight.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        freightManipulatorFourBar.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
 
         // reset drive to run using encoder mode
         driveFrontLeft.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         driveFrontRight.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         driveBackLeft.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         driveBackRight.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        freightManipulatorFourBar.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
-        // set the IMU parameters
+        intake.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        carouselManipulatorMotor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+
+        // Set up the parameters with which we will use our IMU. Note that integration
+        // algorithm here just reports accelerations to the logcat log; it doesn't actually
+        // provide positional information.
         BNO055IMU.Parameters parameters = new BNO055IMU.Parameters();
-        parameters.angleUnit = BNO055IMU.AngleUnit.DEGREES;
-        parameters.accelUnit = BNO055IMU.AccelUnit.METERS_PERSEC_PERSEC;
-        parameters.calibrationDataFile = "BNO055IMUCalibration.json";
-        parameters.loggingEnabled = true;
-        parameters.loggingTag = "IMU";
+        parameters.angleUnit           = BNO055IMU.AngleUnit.DEGREES;
+        parameters.accelUnit           = BNO055IMU.AccelUnit.METERS_PERSEC_PERSEC;
+        parameters.calibrationDataFile = "BNO055IMUCalibration.json"; // see the calibration sample opmode
+        parameters.loggingEnabled      = true;
+        parameters.loggingTag          = "IMU";
         parameters.accelerationIntegrationAlgorithm = new JustLoggingAccelerationIntegrator();
 
-        // get the IMU information and initialize it
+        // Retrieve and initialize the IMU. We expect the IMU to be attached to an I2C port
+        // on a Core Device Interface Module, configured to be a sensor of type "AdaFruit IMU",
+        // and named "imu".
         imu = hardwareMap.get(BNO055IMU.class, "imu");
         imu.initialize(parameters);
 
-        // set up telemetry dashboard
+        // Set up our telemetry dashboard
         composeTelemetry();
+        //angles   = imu.getAngularOrientation(AxesReference.INTRINSIC, AxesOrder.ZYX, AngleUnit.DEGREES);
 
         // wait for the user to start the robot
         waitForStart();
 
-        // start the logging of measured acceleration
+        // Start the logging of measured acceleration
         imu.startAccelerationIntegration(new Position(), new Velocity(), 1000);
 
-        // TEST
-        driveDistance(FORWARD_SPEED, 24);
-        strafeDistance(STRAFE_SPEED, 24);
+        servo.setPosition(0.5);
+
+        freightManipulatorFourBar.setTargetPosition(300);
+        freightManipulatorFourBar.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+        freightManipulatorFourBar.setPower(0.85);
+        while(opModeIsActive() && freightManipulatorFourBar.isBusy()) {
+            telemetry.update();
+        }
+
+        strafeDistance(STRAFE_SPEED, 16);
+        driveDistance(FORWARD_SPEED, -30);
+        strafeDistance(0.1, -10);
+
+        carouselManipulatorMotor.setPower(0.5);
+        try {
+            Thread.sleep(5000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        carouselManipulatorMotor.setPower(0);
+
+        strafeDistance(STRAFE_SPEED, 6);
+        //strafeDistance(STRAFE_SPEED, -8);
+
+        driveDistance(FORWARD_SPEED, 72);
+        strafeDistance(STRAFE_SPEED, 26);
+
+        driveDistance(FORWARD_SPEED, 36);
 
         // NOT WORKING, UNSURE WHY. ANGLES DO NOT GET UPDATED AT ALL BUT ARE UPDATED IN
         // THE BNO055IMU EXAMPLE CODE
@@ -145,10 +187,10 @@ public class AutonomousOpMode extends LinearOpMode {
         driveBackRight.setDirection(DcMotorSimple.Direction.REVERSE);
 
         // set the target for each motor
-        int targetFrontLeft = driveFrontLeft.getCurrentPosition() + (int)(target + PULSES_PER_INCH);
-        int targetFrontRight = driveFrontRight.getCurrentPosition() + (int)(target + PULSES_PER_INCH);
-        int targetBackLeft = driveBackLeft.getCurrentPosition() + (int)(target + PULSES_PER_INCH);
-        int targetBackRight = driveBackRight.getCurrentPosition() + (int)(target + PULSES_PER_INCH);
+        int targetFrontLeft = driveFrontLeft.getCurrentPosition() + (int)(target * PULSES_PER_INCH);
+        int targetFrontRight = driveFrontRight.getCurrentPosition() + (int)(target * PULSES_PER_INCH);
+        int targetBackLeft = driveBackLeft.getCurrentPosition() + (int)(target * PULSES_PER_INCH);
+        int targetBackRight = driveBackRight.getCurrentPosition() + (int)(target * PULSES_PER_INCH);
 
         // set the target position for each motor
         driveFrontLeft.setTargetPosition(-targetFrontLeft);
@@ -217,10 +259,10 @@ public class AutonomousOpMode extends LinearOpMode {
         driveBackRight.setDirection(DcMotorSimple.Direction.REVERSE);
 
         // set the target for each motor
-        int targetFrontLeft = driveFrontLeft.getCurrentPosition() + (int)(target + PULSES_PER_INCH);
-        int targetFrontRight = driveFrontRight.getCurrentPosition() + (int)(target + PULSES_PER_INCH);
-        int targetBackLeft = driveBackLeft.getCurrentPosition() + (int)(target + PULSES_PER_INCH);
-        int targetBackRight = driveBackRight.getCurrentPosition() + (int)(target + PULSES_PER_INCH);
+        int targetFrontLeft = driveFrontLeft.getCurrentPosition() + (int)(target * PULSES_PER_INCH);
+        int targetFrontRight = driveFrontRight.getCurrentPosition() + (int)(target * PULSES_PER_INCH);
+        int targetBackLeft = driveBackLeft.getCurrentPosition() + (int)(target * PULSES_PER_INCH);
+        int targetBackRight = driveBackRight.getCurrentPosition() + (int)(target * PULSES_PER_INCH);
 
         // set the target position for each motor
         driveFrontLeft.setTargetPosition(-targetFrontLeft);
@@ -266,6 +308,15 @@ public class AutonomousOpMode extends LinearOpMode {
     }
 
     public void turnToAngle(double speed, double target) {
+
+        // Make the target on a regular degree scale
+        target = -target;
+
+        // Fake PID
+        double speedFactor = 1;
+        double SLOW_MARK = 25;
+        double STOP_MARK = 10;
+
         // create a drivetrain object
         Drivetrain drivetrain = new Drivetrain();
 
@@ -283,24 +334,44 @@ public class AutonomousOpMode extends LinearOpMode {
         driveFrontRight.setDirection(DcMotorSimple.Direction.REVERSE);
         driveBackRight.setDirection(DcMotorSimple.Direction.REVERSE);
 
-        angles = imu.getAngularOrientation(AxesReference.INTRINSIC, AxesOrder.ZYX, AngleUnit.DEGREES);
+        if (target < angles.firstAngle) {
 
-        // start motion. turn left if angle is greater than the target angle, turn right if
-        // the angle is less than the target angle
-        while(opModeIsActive() && target != angles.firstAngle) {
-            if(angles.firstAngle < target) {
-                driveFrontLeft.setPower(-speed);
-                driveFrontRight.setPower(speed);
-                driveBackLeft.setPower(-speed);
-                driveBackRight.setPower(speed);
+            while (target < angles.firstAngle - STOP_MARK) {
+
+                if (Math.abs(target - angles.firstAngle) < SLOW_MARK) {
+
+                    speedFactor = 1 - Math.abs(target - angles.firstAngle) / SLOW_MARK / 2;
+
+                }
+
+                driveFrontLeft.setPower(-Math.abs(speed) * speedFactor);
+                driveFrontRight.setPower(Math.abs(speed) * speedFactor);
+                driveBackLeft.setPower(-Math.abs(speed) * speedFactor);
+                driveBackRight.setPower(Math.abs(speed) * speedFactor);
+
+                telemetry.update();
+
             }
-            else if(angles.firstAngle > target) {
-                driveFrontLeft.setPower(speed);
-                driveFrontRight.setPower(-speed);
-                driveBackLeft.setPower(speed);
-                driveBackRight.setPower(-speed);
+
+        } else {
+
+            while (target > angles.firstAngle + STOP_MARK) {
+
+                if (Math.abs(target - angles.firstAngle) < SLOW_MARK) {
+
+                    speedFactor = 1 - Math.abs(target - angles.firstAngle) / SLOW_MARK / 2;
+
+                }
+
+                driveFrontLeft.setPower(Math.abs(speed) * speedFactor);
+                driveFrontRight.setPower(-Math.abs(speed) * speedFactor);
+                driveBackLeft.setPower(Math.abs(speed) * speedFactor);
+                driveBackRight.setPower(-Math.abs(speed) * speedFactor);
+
+                telemetry.update();
+
             }
-            telemetry.update();
+
         }
 
         // stop all motion
@@ -308,9 +379,23 @@ public class AutonomousOpMode extends LinearOpMode {
         driveFrontRight.setPower(0);
         driveBackLeft.setPower(0);
         driveBackRight.setPower(0);
+
+        // reset encoders
+        driveFrontLeft.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        driveFrontRight.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        driveBackLeft.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        driveBackRight.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+
+        // reset drive to run using encoder mode
+        driveFrontLeft.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        driveFrontRight.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        driveBackLeft.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        driveBackRight.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+
     }
 
     void composeTelemetry() {
+
         // At the beginning of each telemetry update, grab a bunch of data
         // from the IMU that we will then display in separate lines.
         telemetry.addAction(new Runnable() { @Override public void run()
@@ -318,7 +403,8 @@ public class AutonomousOpMode extends LinearOpMode {
             // Acquiring the angles is relatively expensive; we don't want
             // to do that in each of the three items that need that info, as that's
             // three times the necessary expense.
-            Orientation angles = imu.getAngularOrientation(AxesReference.INTRINSIC, AxesOrder.ZYX, AngleUnit.DEGREES);
+            angles   = imu.getAngularOrientation(AxesReference.INTRINSIC, AxesOrder.ZYX, AngleUnit.DEGREES);
+            gravity  = imu.getGravity();
         }
         });
 
@@ -350,7 +436,26 @@ public class AutonomousOpMode extends LinearOpMode {
                         return formatAngle(angles.angleUnit, angles.thirdAngle);
                     }
                 });
+
+        telemetry.addLine()
+                .addData("grvty", new Func<String>() {
+                    @Override public String value() {
+                        return gravity.toString();
+                    }
+                })
+                .addData("mag", new Func<String>() {
+                    @Override public String value() {
+                        return String.format(Locale.getDefault(), "%.3f",
+                                Math.sqrt(gravity.xAccel*gravity.xAccel
+                                        + gravity.yAccel*gravity.yAccel
+                                        + gravity.zAccel*gravity.zAccel));
+                    }
+                });
     }
+
+    //----------------------------------------------------------------------------------------------
+    // Formatting
+    //----------------------------------------------------------------------------------------------
 
     String formatAngle(AngleUnit angleUnit, double angle) {
         return formatDegrees(AngleUnit.DEGREES.fromUnit(angleUnit, angle));
@@ -359,4 +464,5 @@ public class AutonomousOpMode extends LinearOpMode {
     String formatDegrees(double degrees){
         return String.format(Locale.getDefault(), "%.1f", AngleUnit.DEGREES.normalize(degrees));
     }
+
 }

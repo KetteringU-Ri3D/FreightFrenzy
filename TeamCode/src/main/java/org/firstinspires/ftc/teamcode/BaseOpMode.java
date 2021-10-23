@@ -1,12 +1,38 @@
 package org.firstinspires.ftc.teamcode;
 
+import com.qualcomm.hardware.bosch.BNO055IMU;
+import com.qualcomm.hardware.bosch.JustLoggingAccelerationIntegrator;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 
+import org.firstinspires.ftc.robotcore.external.Func;
+import org.firstinspires.ftc.robotcore.external.navigation.Acceleration;
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.AxesOrder;
+import org.firstinspires.ftc.robotcore.external.navigation.AxesReference;
+import org.firstinspires.ftc.robotcore.external.navigation.Orientation;
+import org.firstinspires.ftc.robotcore.external.navigation.Position;
+import org.firstinspires.ftc.robotcore.external.navigation.Velocity;
+
+import java.util.Locale;
+
 @TeleOp
 public class BaseOpMode extends LinearOpMode {
+
+    //----------------------------------------------------------------------------------------------
+    // State
+    //----------------------------------------------------------------------------------------------
+
+    // The IMU sensor object
+    BNO055IMU imu;
+
+    // State used for updating telemetry
+    Orientation angles;
+    Acceleration gravity;
+
+
     @Override
     public void runOpMode() {
         // create class objects
@@ -27,25 +53,40 @@ public class BaseOpMode extends LinearOpMode {
         // define manipulator motors on the expansion hub using the following map
         // freightManipulatorLeft = 0
         // freightManipulatorRight = 1
-        // freightManipulatorFourBar = 2
-        // carouselManipulatorMotor = 3
+        // carouselManipulatorMotor = 2
         DcMotor freightManipulatorLeft = hardwareMap.dcMotor.get("freightManipulatorLeft");
         DcMotor freightManipulatorRight = hardwareMap.dcMotor.get("freightManipulatorRight");
-        DcMotor freightManipulatorFourBar = hardwareMap.dcMotor.get("freightManipulatorFourBar");
         DcMotor carouselManipulatorMotor = hardwareMap.dcMotor.get("carouselManipulatorMotor");
 
         // reverse the motors on the right side of the drivetrain
         driveFrontRight.setDirection(DcMotorSimple.Direction.REVERSE);
         driveBackRight.setDirection(DcMotorSimple.Direction.REVERSE);
 
-        // set the mode of all drive motors to return them to normal after autonomous
-        driveFrontLeft.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        driveFrontRight.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        driveBackLeft.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        driveBackRight.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        // Set up the parameters with which we will use our IMU. Note that integration
+        // algorithm here just reports accelerations to the logcat log; it doesn't actually
+        // provide positional information.
+        BNO055IMU.Parameters parameters = new BNO055IMU.Parameters();
+        parameters.angleUnit           = BNO055IMU.AngleUnit.DEGREES;
+        parameters.accelUnit           = BNO055IMU.AccelUnit.METERS_PERSEC_PERSEC;
+        parameters.calibrationDataFile = "BNO055IMUCalibration.json"; // see the calibration sample opmode
+        parameters.loggingEnabled      = true;
+        parameters.loggingTag          = "IMU";
+        parameters.accelerationIntegrationAlgorithm = new JustLoggingAccelerationIntegrator();
+
+        // Retrieve and initialize the IMU. We expect the IMU to be attached to an I2C port
+        // on a Core Device Interface Module, configured to be a sensor of type "AdaFruit IMU",
+        // and named "imu".
+        imu = hardwareMap.get(BNO055IMU.class, "imu");
+        imu.initialize(parameters);
+
+        // Set up our telemetry dashboard
+        composeTelemetry();
 
         // wait for the match to start
         waitForStart();
+
+        // Start the logging of measured acceleration
+        imu.startAccelerationIntegration(new Position(), new Velocity(), 1000);
 
         // run while the OpMode is active
         while(opModeIsActive()) {
@@ -58,39 +99,79 @@ public class BaseOpMode extends LinearOpMode {
             drivetrain.drive(driveFrontLeft, driveFrontRight, driveBackLeft, driveBackRight,
                     leftY, leftX, rightX);
 
-            // create a button map
-            // freight manipulator controls:
-            // left bumper = outtake, right bumper = intake
-            if(gamepad1.right_bumper == true) {
-                freightManipulator.intake(freightManipulatorLeft, freightManipulatorRight, 0.75);
-            }
-            else if(gamepad1.left_bumper == true) {
-                freightManipulator.outtake(freightManipulatorLeft, freightManipulatorRight, 0.75);
-            }
-            else {
-                freightManipulator.stopCollector(freightManipulatorLeft, freightManipulatorRight);
-            }
 
-            // freight manipulator four-bar controls:
-            // left trigger = lower, right trigger = raise, neither = stop
-            if(gamepad1.left_trigger >= 0.5) {
-                freightManipulator.raise(freightManipulatorFourBar, 0.5);
-            }
-            else if(gamepad1.left_trigger >= 0.5) {
-                freightManipulator.lower(freightManipulatorFourBar, 0.5);
-            }
-            else {
-                freightManipulator.stopFourBar(freightManipulatorFourBar);
-            }
-
-            // carousel manipulator controls:
-            // a = forward (duck towards the field), b = reverse (duck away from the field)
-            if(gamepad1.a == true) {
-                carouselManipulator.forward(carouselManipulatorMotor, 0.25);
-            }
-            else if(gamepad1.b == true) {
-                carouselManipulator.reverse(carouselManipulatorMotor, 0.25);
-            }
+            telemetry.update();
         }
+    }
+
+    void composeTelemetry() {
+
+        // At the beginning of each telemetry update, grab a bunch of data
+        // from the IMU that we will then display in separate lines.
+        telemetry.addAction(new Runnable() { @Override public void run()
+        {
+            // Acquiring the angles is relatively expensive; we don't want
+            // to do that in each of the three items that need that info, as that's
+            // three times the necessary expense.
+            angles   = imu.getAngularOrientation(AxesReference.INTRINSIC, AxesOrder.ZYX, AngleUnit.DEGREES);
+            gravity  = imu.getGravity();
+        }
+        });
+
+        telemetry.addLine()
+                .addData("status", new Func<String>() {
+                    @Override public String value() {
+                        return imu.getSystemStatus().toShortString();
+                    }
+                })
+                .addData("calib", new Func<String>() {
+                    @Override public String value() {
+                        return imu.getCalibrationStatus().toString();
+                    }
+                });
+
+        telemetry.addLine()
+                .addData("heading", new Func<String>() {
+                    @Override public String value() {
+                        return formatAngle(angles.angleUnit, angles.firstAngle);
+                    }
+                })
+                .addData("roll", new Func<String>() {
+                    @Override public String value() {
+                        return formatAngle(angles.angleUnit, angles.secondAngle);
+                    }
+                })
+                .addData("pitch", new Func<String>() {
+                    @Override public String value() {
+                        return formatAngle(angles.angleUnit, angles.thirdAngle);
+                    }
+                });
+
+        telemetry.addLine()
+                .addData("grvty", new Func<String>() {
+                    @Override public String value() {
+                        return gravity.toString();
+                    }
+                })
+                .addData("mag", new Func<String>() {
+                    @Override public String value() {
+                        return String.format(Locale.getDefault(), "%.3f",
+                                Math.sqrt(gravity.xAccel*gravity.xAccel
+                                        + gravity.yAccel*gravity.yAccel
+                                        + gravity.zAccel*gravity.zAccel));
+                    }
+                });
+    }
+
+    //----------------------------------------------------------------------------------------------
+    // Formatting
+    //----------------------------------------------------------------------------------------------
+
+    String formatAngle(AngleUnit angleUnit, double angle) {
+        return formatDegrees(AngleUnit.DEGREES.fromUnit(angleUnit, angle));
+    }
+
+    String formatDegrees(double degrees){
+        return String.format(Locale.getDefault(), "%.1f", AngleUnit.DEGREES.normalize(degrees));
     }
 }

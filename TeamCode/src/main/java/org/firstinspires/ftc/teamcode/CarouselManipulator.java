@@ -11,7 +11,7 @@ public class CarouselManipulator {
      * @param motor  motor on the motor side of the manipulator
      * @param power voltage to apply to the motors
      */
-    public void forward(DcMotor motor, double power) {
+    public void intake(DcMotor motor, double power) {
         // spin the motor clockwise
         motor.setPower(power);
     }
@@ -21,7 +21,7 @@ public class CarouselManipulator {
      * @param motor  motor on the motor side of the manipulator
      * @param power voltage to apply to the motors
      */
-    public void reverse(DcMotor motor, double power) {
+    public void outtake(DcMotor motor, double power) {
         // spin the motor counter-clockwise
         motor.setPower(-power);
     }
